@@ -1,0 +1,26 @@
+{
+  "classes": [
+    "D00",
+    "D10",
+    "D20",
+    "D40"
+  ],
+  "max_side": 1280,
+  "countries": {
+    "India": {
+      "dropped_D01": 179,
+      "dropped_D0w0": 1,
+      "dropped_D11": 45,
+      "dropped_D43": 57,
+      "dropped_D44": 1062,
+      "dropped_D50": 28,
+      "images": 7706,
+      "images_background": 4483,
+      "images_with_boxes": 3223,
+      "kept_D00": 1555,
+      "kept_D10": 68,
+      "kept_D20": 2021,
+      "kept_D40": 3187
+    }
+  }
+}

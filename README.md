@@ -51,6 +51,35 @@ internet still need a signature.
 index matters: plain `pip install torch` from PyPI on Windows installs a
 **CPU-only** build, and training would not use the GPU.
 
+## Firmware (ESP32-CAM)
+
+1. Copy `firmware/smartpole_node/secrets.example.h` to `secrets.h` and fill in
+   the hotspot name and password (`secrets.h` is gitignored).
+2. Open `firmware/smartpole_node/smartpole_node.ino` in Arduino IDE.
+3. Tools: Board **ESP32 Dev Module**, PSRAM **Enabled**, Partition Scheme
+   **Huge APP (3MB No OTA/1MB SPIFFS)**, Upload Speed **115200**, Port = the
+   MB board's COM port.
+4. Upload, then open Serial Monitor at 115200 baud.
+
+## Server
+
+```powershell
+python -m server.app                  # listens on 0.0.0.0:8000, broadcasts on UDP 50000
+python -m server.send_test_image      # second terminal: fake ESP32 uploads
+python -m server.listen_discovery     # second terminal: check the UDP broadcast
+```
+
+## Dataset and training
+
+```powershell
+python -m training.extract_rdd2022                         # unzip figshare archive (once)
+python -m training.inspect_dataset                         # label counts -> training/reports/
+python -m training.convert_voc_to_yolo --countries India   # VOC XML -> YOLO txt
+python -m training.split_dataset --countries India --name india
+python -m training.train                                   # India baseline, yolo11n
+python -m training.train --name india_yolo11n --resume     # continue an interrupted run
+```
+
 ## Backing up model weights (do this every time training finishes)
 
 `.pt` files are excluded from git. They are too large for GitHub, and

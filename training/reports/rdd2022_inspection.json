@@ -1,0 +1,145 @@
+{
+  "China_Drone": {
+    "xml_files": 2401,
+    "images": 2401,
+    "images_without_xml": 0,
+    "xml_without_image": 0,
+    "labels": {
+      "D00": 1426,
+      "D10": 1263,
+      "Repair": 769,
+      "D20": 293,
+      "D40": 86,
+      "Block crack": 3
+    },
+    "images_with_no_objects": 5,
+    "images_with_no_target_objects": 482,
+    "boxes_with_zero_or_negative_size": 0,
+    "image_sizes": {
+      "512x512": 2401
+    }
+  },
+  "China_MotorBike": {
+    "xml_files": 1977,
+    "images": 1977,
+    "images_without_xml": 0,
+    "xml_without_image": 0,
+    "labels": {
+      "D00": 2678,
+      "D10": 1096,
+      "D20": 641,
+      "Repair": 277,
+      "D40": 235
+    },
+    "images_with_no_objects": 0,
+    "images_with_no_target_objects": 43,
+    "boxes_with_zero_or_negative_size": 0,
+    "image_sizes": {
+      "512x512": 1977
+    }
+  },
+  "Czech": {
+    "xml_files": 2829,
+    "images": 2829,
+    "images_without_xml": 0,
+    "xml_without_image": 0,
+    "labels": {
+      "D00": 988,
+      "D10": 399,
+      "D40": 197,
+      "D20": 161
+    },
+    "images_with_no_objects": 1757,
+    "images_with_no_target_objects": 1757,
+    "boxes_with_zero_or_negative_size": 0,
+    "image_sizes": {
+      "600x600": 2829
+    }
+  },
+  "India": {
+    "xml_files": 7706,
+    "images": 7706,
+    "images_without_xml": 0,
+    "xml_without_image": 0,
+    "labels": {
+      "D40": 3187,
+      "D20": 2021,
+      "D00": 1555,
+      "D44": 1062,
+      "D01": 179,
+      "D10": 68,
+      "D43": 57,
+      "D11": 45,
+      "D50": 28,
+      "D0w0": 1
+    },
+    "images_with_no_objects": 3921,
+    "images_with_no_target_objects": 4483,
+    "boxes_with_zero_or_negative_size": 0,
+    "image_sizes": {
+      "720x720": 7706
+    }
+  },
+  "Japan": {
+    "xml_files": 10506,
+    "images": 10506,
+    "images_without_xml": 0,
+    "xml_without_image": 0,
+    "labels": {
+      "D20": 6199,
+      "D00": 4049,
+      "D44": 3995,
+      "D10": 3979,
+      "D50": 3553,
+      "D40": 2243,
+      "D43": 736
+    },
+    "images_with_no_objects": 794,
+    "images_with_no_target_objects": 2606,
+    "boxes_with_zero_or_negative_size": 1,
+    "image_sizes": {
+      "600x600": 10187,
+      "1024x1024": 147,
+      "540x540": 124,
+      "1080x1080": 48
+    }
+  },
+  "Norway": {
+    "xml_files": 8161,
+    "images": 8161,
+    "images_without_xml": 0,
+    "xml_without_image": 0,
+    "labels": {
+      "D00": 8570,
+      "D10": 1730,
+      "D20": 468,
+      "D40": 461
+    },
+    "images_with_no_objects": 5247,
+    "images_with_no_target_objects": 5247,
+    "boxes_with_zero_or_negative_size": 0,
+    "image_sizes": {
+      "4040x2035": 4342,
+      "3643x2041": 2896,
+      "3650x2044": 923
+    }
+  },
+  "United_States": {
+    "xml_files": 4805,
+    "images": 4805,
+    "images_without_xml": 0,
+    "xml_without_image": 0,
+    "labels": {
+      "D00": 6750,
+      "D10": 3295,
+      "D20": 834,
+      "D40": 135
+    },
+    "images_with_no_objects": 0,
+    "images_with_no_target_objects": 0,
+    "boxes_with_zero_or_negative_size": 0,
+    "image_sizes": {
+      "640x640": 4805
+    }
+  }
+}

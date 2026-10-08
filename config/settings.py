@@ -32,3 +32,31 @@ TRAINING_RUNS_DIR = PROJECT_ROOT / "training" / "runs"
 # connections from this laptop itself.
 SERVER_HOST = "0.0.0.0"
 SERVER_PORT = 8000
+
+# The server announces itself with a UDP broadcast so the ESP32 can find the
+# laptop even when the hotspot gives the laptop a new IP address.
+# Must match DISCOVERY_PORT in the firmware.
+DISCOVERY_PORT = 50000
+DISCOVERY_INTERVAL_S = 2.0
+
+# Uploads larger than this are rejected. An SVGA JPEG is ~30-80 KB, so 2 MB
+# leaves plenty of room while stopping accidental huge uploads.
+MAX_UPLOAD_BYTES = 2 * 1024 * 1024
+
+# The dashboard shows the node as offline if no heartbeat arrived recently.
+HEARTBEAT_TIMEOUT_S = 30
+
+# ---- Worker ----
+# While training is still running, point at last.pt (newest epoch). Once a
+# run is finished, switch to that run's best.pt.
+WORKER_WEIGHTS = TRAINING_RUNS_DIR / "india_yolo11n" / "weights" / "last.pt"
+# "cpu" keeps the GPU free while a training run is using it. Use "0" (the
+# RTX 4060) once training is finished: inference is then ~10x faster.
+# Warning: with 15 GB of RAM, running the worker DURING training pushed
+# Windows out of memory and crashed the training run (2026-10-09). Only run
+# the worker while training if the training uses --workers 2 or fewer.
+WORKER_DEVICE = "cpu"
+WORKER_CONF = 0.25          # ignore detections below this confidence
+WORKER_IMGSZ = 640          # same size the model was trained at
+WORKER_POLL_S = 1.0         # how often to look for new pending images
+WORKER_MAX_ATTEMPTS = 3     # give up on an image after this many failed tries

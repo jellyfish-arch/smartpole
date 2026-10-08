@@ -1,0 +1,6 @@
+# Streamlit settings, read when `streamlit run` is started from the project root.
+[browser]
+gatherUsageStats = false   # don't send usage statistics to Streamlit
+
+[server]
+port = 8501

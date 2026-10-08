@@ -1,0 +1,24 @@
+{
+  "seed": 42,
+  "train_frac": 0.8,
+  "val_frac": 0.1,
+  "max_background_frac": 0.1,
+  "countries": {
+    "India": {
+      "train": {
+        "images": 2864,
+        "background": 286
+      },
+      "val": {
+        "images": 358,
+        "background": 36
+      },
+      "test": {
+        "images": 359,
+        "background": 36
+      },
+      "background_available": 4483,
+      "background_used": 358
+    }
+  }
+}
