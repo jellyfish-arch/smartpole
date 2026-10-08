@@ -1,0 +1,50 @@
+# ---- Python ----
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+
+# ---- Runtime data (uploads, annotated images, results, database) ----
+# Everything in data/ is generated while the system runs. Keep only the
+# placeholder so the folder exists after a fresh clone.
+data/*
+!data/.gitkeep
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+
+# ---- Dataset ----
+# RDD2022 (~12.3 GB) lives outside the repo. These patterns are a safety
+# net in case a copy or a converted version ends up inside the project.
+RDD2022*/
+dataset/
+datasets/
+training/datasets/
+*.zip
+*.tar
+*.tar.gz
+
+# ---- Model weights and training outputs ----
+# Too big for git. Back best.pt up to Google Drive instead (see README).
+*.pt
+*.pth
+*.onnx
+*.engine
+*.torchscript
+runs/
+training/runs/
+
+# ---- Firmware secrets ----
+# Wi-Fi password lives here, so it never reaches GitHub (see Phase 1).
+firmware/**/secrets.h
+
+# ---- Editors / OS ----
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store
