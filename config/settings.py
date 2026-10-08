@@ -47,15 +47,15 @@ MAX_UPLOAD_BYTES = 2 * 1024 * 1024
 HEARTBEAT_TIMEOUT_S = 30
 
 # ---- Worker ----
-# While training is still running, point at last.pt (newest epoch). Once a
-# run is finished, switch to that run's best.pt.
-WORKER_WEIGHTS = TRAINING_RUNS_DIR / "india_yolo11n" / "weights" / "last.pt"
-# "cpu" keeps the GPU free while a training run is using it. Use "0" (the
-# RTX 4060) once training is finished: inference is then ~10x faster.
+# While a training run is in progress, point at its last.pt (newest epoch).
+# Once it has finished, use that run's best.pt (best validation mAP).
+WORKER_WEIGHTS = TRAINING_RUNS_DIR / "india_yolo11n" / "weights" / "best.pt"
+# "0" = the RTX 4060. Use "cpu" while a training run is using the GPU,
+# so inference does not compete with training.
 # Warning: with 15 GB of RAM, running the worker DURING training pushed
 # Windows out of memory and crashed the training run (2026-10-09). Only run
 # the worker while training if the training uses --workers 2 or fewer.
-WORKER_DEVICE = "cpu"
+WORKER_DEVICE = "0"
 WORKER_CONF = 0.25          # ignore detections below this confidence
 WORKER_IMGSZ = 640          # same size the model was trained at
 WORKER_POLL_S = 1.0         # how often to look for new pending images

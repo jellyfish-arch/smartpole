@@ -69,6 +69,21 @@ python -m server.send_test_image      # second terminal: fake ESP32 uploads
 python -m server.listen_discovery     # second terminal: check the UDP broadcast
 ```
 
+## Worker and dashboard
+
+Each in its own terminal, alongside the server:
+
+```powershell
+python -m worker.worker               # YOLO on new uploads (weights/device in config/settings.py)
+streamlit run dashboard/app.py        # http://localhost:8501, refreshes every 3 s
+python -m worker.check_integrity      # any time: proves no image was processed twice
+```
+
+Don't run the worker on the GPU while a training run is going: on this
+laptop (15 GB RAM) the extra PyTorch process ran Windows out of memory and
+crashed training. Use `--device cpu` and train with `--workers 2` if both
+must run together.
+
 ## Dataset and training
 
 ```powershell

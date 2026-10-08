@@ -57,12 +57,16 @@ st.set_page_config(page_title="SmartPole", page_icon="🛣️", layout="wide")
 st.title("SmartPole: road damage monitor")
 
 db.init_db()   # creates empty tables if the server has never run yet
+# Most recently active node first, so the page opens on the live camera.
 poles = [r["pole_id"] for r in query(
-    "SELECT pole_id FROM images UNION SELECT pole_id FROM heartbeats ORDER BY pole_id")]
+    """SELECT pole_id, MAX(t) AS last_seen FROM (
+           SELECT pole_id, received_at AS t FROM images
+           UNION ALL SELECT pole_id, received_at FROM heartbeats)
+       GROUP BY pole_id ORDER BY last_seen DESC""")]
 if not poles:
     st.info("No data yet. Start the server and the node (or `python -m server.send_test_image`).")
     st.stop()
-pole = st.selectbox("Camera node", poles, index=len(poles) - 1)
+pole = st.selectbox("Camera node", poles)
 
 
 @st.fragment(run_every=REFRESH_S)
@@ -82,9 +86,9 @@ def live_view():
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Camera", "🟢 Online" if online else "🔴 Offline",
               f"heartbeat {age(hb_time)}" if hb_time else "no heartbeat yet",
-              delta_color="off")
+              delta_color="off", delta_arrow="off")
     c2.metric("Last upload", local_time(last_upload_time).split(", ")[-1] if last_upload_time else "never",
-              age(last_upload_time), delta_color="off")
+              age(last_upload_time), delta_color="off", delta_arrow="off")
     c3.metric("Images received", sum(status.values()))
     c4.metric("Waiting for worker", status.get("pending", 0) + status.get("processing", 0))
     c5.metric("Failed", status.get("error", 0))

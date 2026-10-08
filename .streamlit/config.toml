@@ -4,3 +4,6 @@ gatherUsageStats = false   # don't send usage statistics to Streamlit
 
 [server]
 port = 8501
+# Only this laptop can open the dashboard. The ESP32 never needs it, and
+# without this anyone on the hotspot could view it.
+address = "localhost"
