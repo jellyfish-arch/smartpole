@@ -84,6 +84,13 @@ laptop (15 GB RAM) the extra PyTorch process ran Windows out of memory and
 crashed training. Use `--device cpu` and train with `--workers 2` if both
 must run together.
 
+## Demo: test any image
+
+The dashboard's **Test an image** tab (and `python -m tools.test_image <image>`)
+runs any road photo, such as one sent on WhatsApp or a random RDD2022 test image,
+through the same server and worker as a camera photo. Step-by-step guide:
+[docs/DEMO.md](docs/DEMO.md).
+
 ## Dataset and training
 
 ```powershell

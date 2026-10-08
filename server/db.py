@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS images (
     width        INTEGER NOT NULL,
     height       INTEGER NOT NULL,
     status       TEXT    NOT NULL DEFAULT 'pending',  -- pending / processing / done / error
+    source       TEXT    NOT NULL DEFAULT 'camera',   -- 'camera' (ESP32) or 'manual' (demo test)
+    original_name TEXT,                 -- file name of a manual test upload
     -- filled in by the worker:
     attempts       INTEGER NOT NULL DEFAULT 0,
     claimed_at     TEXT,
@@ -57,6 +59,16 @@ CREATE TABLE IF NOT EXISTS detections (
     x2 REAL NOT NULL, y2 REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_detections_image ON detections(image_id);
+
+-- One row per running worker, refreshed every few seconds, so the dashboard
+-- can tell whether a worker is running.
+CREATE TABLE IF NOT EXISTS workers (
+    worker_id    TEXT PRIMARY KEY,
+    started_at   TEXT NOT NULL,
+    last_seen    TEXT NOT NULL,
+    device       TEXT,
+    weights      TEXT
+);
 """
 
 # Columns added after the first version of a table. CREATE TABLE IF NOT
@@ -64,6 +76,8 @@ CREATE INDEX IF NOT EXISTS idx_detections_image ON detections(image_id);
 # file gets these columns added here instead of having to be deleted.
 ADDED_COLUMNS = {
     "images": {
+        "source": "TEXT NOT NULL DEFAULT 'camera'",
+        "original_name": "TEXT",
         "attempts": "INTEGER NOT NULL DEFAULT 0",
         "claimed_at": "TEXT",
         "claimed_by": "TEXT",
@@ -108,12 +122,13 @@ def init_db() -> None:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
 
 
-def insert_image(pole_id, seq, received_at, path, size_bytes, width, height) -> int:
+def insert_image(pole_id, seq, received_at, path, size_bytes, width, height,
+                 source="camera", original_name=None) -> int:
     with connection() as conn:
         cur = conn.execute(
-            "INSERT INTO images (pole_id, seq, received_at, path, size_bytes, width, height)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (pole_id, seq, received_at, path, size_bytes, width, height),
+            "INSERT INTO images (pole_id, seq, received_at, path, size_bytes, width, height,"
+            " source, original_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (pole_id, seq, received_at, path, size_bytes, width, height, source, original_name),
         )
         return cur.lastrowid
 

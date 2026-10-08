@@ -60,3 +60,19 @@ WORKER_CONF = 0.25          # ignore detections below this confidence
 WORKER_IMGSZ = 640          # same size the model was trained at
 WORKER_POLL_S = 1.0         # how often to look for new pending images
 WORKER_MAX_ATTEMPTS = 3     # give up on an image after this many failed tries
+# The worker writes "I'm alive" to the database this often. If the newest
+# note is older than WORKER_TIMEOUT_S, the dashboard reports it as stopped.
+WORKER_HEARTBEAT_S = 5
+WORKER_TIMEOUT_S = 15
+
+# ---- Manual tests ("Test an image" demo mode) ----
+# Programs on this laptop (dashboard, tools/test_image.py) reach the server here.
+LOCAL_SERVER_URL = f"http://127.0.0.1:{SERVER_PORT}"
+# Manual test uploads are stored under this pole ID and with source='manual',
+# so they never mix with real camera data or with growth tracking.
+MANUAL_POLE_ID = "MANUAL"
+# Phone photos are often 4000 px wide and several MB. They are shrunk to this
+# long side before upload (the model works at 640 px anyway), which also
+# keeps them under MAX_UPLOAD_BYTES.
+MANUAL_MAX_SIDE = 1280
+MANUAL_WAIT_S = 30          # how long to wait for the worker's result

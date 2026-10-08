@@ -3,9 +3,14 @@
 Run from the repository root:
     streamlit run dashboard/app.py
 
-Read-only view of the database the server and worker write to. The live
-part re-runs every REFRESH_S seconds, so new uploads appear without
-reloading the page.
+Two tabs:
+  * Live camera   - read-only view of what the ESP32 node has sent. Re-runs
+                    every REFRESH_S seconds, so new uploads appear by themselves.
+  * Test an image - demo mode: upload any road photo, or pick a random image
+                    from the test split. It goes through the same server and
+                    worker as a camera photo, but is stored as a manual test
+                    (pole "MANUAL", source 'manual') so it never mixes with
+                    camera data.
 """
 
 import sys
@@ -21,10 +26,11 @@ import streamlit as st
 
 from config import settings
 from server import db
+from tools import manual_test as mt
 
 REFRESH_S = 3
-CLASS_NAMES = {"D00": "Longitudinal crack", "D10": "Transverse crack",
-               "D20": "Alligator crack", "D40": "Pothole"}
+CLASS_NAMES = mt.CLASS_NAMES
+WORKER_HELP = "Start it in a terminal with:  python -m worker.worker"
 
 
 def parse_utc(text):
@@ -53,24 +59,32 @@ def query(sql, params=()):
         return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
 
+def detections_table(rows):
+    """Detections as a table with a confidence bar."""
+    df = pd.DataFrame(rows)
+    df.insert(1, "type", df["class_name"].map(CLASS_NAMES))
+    df["box (x1, y1, x2, y2)"] = df.apply(
+        lambda r: f"({r.x1:.0f}, {r.y1:.0f}, {r.x2:.0f}, {r.y2:.0f})", axis=1)
+    df["size (px)"] = df.apply(lambda r: f"{r.x2 - r.x1:.0f} x {r.y2 - r.y1:.0f}", axis=1)
+    st.dataframe(df[["class_name", "type", "confidence", "box (x1, y1, x2, y2)", "size (px)"]],
+                 hide_index=True, width="stretch",
+                 column_config={"confidence": st.column_config.ProgressColumn(
+                     "confidence", min_value=0.0, max_value=1.0, format="%.2f")})
+
+
 st.set_page_config(page_title="SmartPole", page_icon="🛣️", layout="wide")
 st.title("SmartPole: road damage monitor")
-
 db.init_db()   # creates empty tables if the server has never run yet
-# Most recently active node first, so the page opens on the live camera.
-poles = [r["pole_id"] for r in query(
-    """SELECT pole_id, MAX(t) AS last_seen FROM (
-           SELECT pole_id, received_at AS t FROM images
-           UNION ALL SELECT pole_id, received_at FROM heartbeats)
-       GROUP BY pole_id ORDER BY last_seen DESC""")]
-if not poles:
-    st.info("No data yet. Start the server and the node (or `python -m server.send_test_image`).")
-    st.stop()
-pole = st.selectbox("Camera node", poles)
 
+live_tab, test_tab = st.tabs(["📷 Live camera", "🧪 Test an image"])
+
+
+# ======================================================================
+# Live camera
+# ======================================================================
 
 @st.fragment(run_every=REFRESH_S)
-def live_view():
+def live_view(pole):
     # ---------------- status row ----------------
     hb = query("SELECT * FROM heartbeats WHERE pole_id=? ORDER BY id DESC LIMIT 1", (pole,))
     hb = hb[0] if hb else None
@@ -83,15 +97,16 @@ def live_view():
     status = {r["status"]: r["n"] for r in query(
         "SELECT status, COUNT(*) AS n FROM images WHERE pole_id=? GROUP BY status", (pole,))}
 
-    c1, c2, c3, c4, c5 = st.columns(5)
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("Camera", "🟢 Online" if online else "🔴 Offline",
               f"heartbeat {age(hb_time)}" if hb_time else "no heartbeat yet",
               delta_color="off", delta_arrow="off")
     c2.metric("Last upload", local_time(last_upload_time).split(", ")[-1] if last_upload_time else "never",
               age(last_upload_time), delta_color="off", delta_arrow="off")
-    c3.metric("Images received", sum(status.values()))
-    c4.metric("Waiting for worker", status.get("pending", 0) + status.get("processing", 0))
-    c5.metric("Failed", status.get("error", 0))
+    c3.metric("Worker", "🟢 Running" if mt.worker_running() else "🔴 Stopped")
+    c4.metric("Images received", sum(status.values()))
+    c5.metric("Waiting for worker", status.get("pending", 0) + status.get("processing", 0))
+    c6.metric("Failed", status.get("error", 0))
     if hb:
         st.caption(f"Last heartbeat {local_time(hb_time)}. Node IP {hb['node_ip']}, "
                    f"signal {hb['rssi']} dBm, uptime {hb['uptime_s']} s, "
@@ -118,22 +133,13 @@ def live_view():
                 width="stretch")
 
     # ---------------- detections table ----------------
-    dets = pd.DataFrame(query(
-        "SELECT class_name, confidence, x1, y1, x2, y2 FROM detections WHERE image_id=? "
-        "ORDER BY confidence DESC", (img["id"],)))
+    dets = query("SELECT class_name, confidence, x1, y1, x2, y2 FROM detections WHERE image_id=? "
+                 "ORDER BY confidence DESC", (img["id"],))
     st.subheader(f"Detections in this image: {len(dets)}")
-    if dets.empty:
-        st.write("No damage detected above the confidence threshold "
-                 f"({settings.WORKER_CONF}).")
+    if not dets:
+        st.write(f"No damage detected above the confidence threshold ({settings.WORKER_CONF}).")
     else:
-        dets.insert(1, "type", dets["class_name"].map(CLASS_NAMES))
-        dets["box (x1, y1, x2, y2)"] = dets.apply(
-            lambda r: f"({r.x1:.0f}, {r.y1:.0f}, {r.x2:.0f}, {r.y2:.0f})", axis=1)
-        dets["size (px)"] = dets.apply(lambda r: f"{r.x2 - r.x1:.0f} x {r.y2 - r.y1:.0f}", axis=1)
-        st.dataframe(dets[["class_name", "type", "confidence", "box (x1, y1, x2, y2)", "size (px)"]],
-                     hide_index=True, width="stretch",
-                     column_config={"confidence": st.column_config.ProgressColumn(
-                         "confidence", min_value=0.0, max_value=1.0, format="%.2f")})
+        detections_table(dets)
         st.caption("Sizes are in pixels. Real-world centimetres need the camera "
                    "calibration (Phase 6).")
 
@@ -167,4 +173,123 @@ def live_view():
                f"{datetime.now().strftime('%H:%M:%S')}.")
 
 
-live_view()
+with live_tab:
+    # Camera nodes only (manual tests are excluded), most recently active first.
+    poles = [r["pole_id"] for r in query(
+        """SELECT pole_id, MAX(t) AS last_seen FROM (
+               SELECT pole_id, received_at AS t FROM images WHERE source = 'camera'
+               UNION ALL SELECT pole_id, received_at FROM heartbeats)
+           WHERE pole_id != ? GROUP BY pole_id ORDER BY last_seen DESC""",
+        (settings.MANUAL_POLE_ID,))]
+    if not poles:
+        st.info("No camera data yet. Start the server and the node (or `python -m server.send_test_image`).")
+    else:
+        live_view(st.selectbox("Camera node", poles))
+
+
+# ======================================================================
+# Test an image (demo mode)
+# ======================================================================
+
+def run_and_remember(data: bytes, name: str):
+    """Send one image through the system and keep its id for display."""
+    with st.spinner(f"Sending {name} to the server and waiting for the worker..."):
+        try:
+            test = mt.run_test(data, name)
+            st.session_state["manual_id"] = test["image_id"]
+            st.session_state["manual_total_s"] = test["total_s"]
+        except mt.DemoError as e:
+            st.session_state.pop("manual_id", None)
+            st.error(str(e))
+
+
+def show_manual_result(image_id: int):
+    info = mt.describe(image_id)
+    row = info["row"]
+    name = row["original_name"] or f"image #{image_id}"
+    st.subheader(f"Result: {name}  (image #{image_id})")
+
+    if row["status"] == "error":
+        st.error(f"The worker could not process this image: {row['error']}")
+        return
+
+    # Where the image came from, and whether it is a fair test.
+    if info["gt"] is None:
+        st.info("**No ground truth.** This image is not from RDD2022 (for example a "
+                "WhatsApp photo), so there is no correct answer to compare with. "
+                "Only the model's prediction is shown.")
+    elif info["split"] == "test":
+        st.success(f"RDD2022 image: {mt.SPLIT_WARNING['test']}")
+    elif info["split"] in ("train", "val"):
+        st.warning(f"RDD2022 image: {mt.SPLIT_WARNING[info['split']]}")
+
+    # Numbers.
+    preds = info["preds"]
+    m = st.columns(5 if info["comparison"] else 3)
+    m[0].metric("Damages found by model", len(preds))
+    m[1].metric("Model processing time", f"{row['inference_ms']:.0f} ms")
+    total = st.session_state.get("manual_total_s")
+    m[2].metric("Total (upload + queue + model)", f"{total:.1f} s" if total else "-")
+    if info["comparison"]:
+        c = info["comparison"]
+        if c["real"]:
+            m[3].metric("Real damages found", f"{c['found']} of {c['real']}")
+        else:
+            m[3].metric("Real damages", "none (clean road)")
+        m[4].metric("False alarms", c["false_alarms"])
+
+    # Images side by side.
+    original = settings.PROJECT_ROOT / row["path"]
+    cols = st.columns(3 if info["gt"] is not None else 2)
+    cols[0].image(str(original), caption="Original", width="stretch")
+    cols[1].image(str(settings.PROJECT_ROOT / row["annotated_path"]),
+                  caption="Model prediction", width="stretch")
+    if info["gt"] is not None:
+        cols[2].image(mt.draw_ground_truth(original, info["gt"]),
+                      caption=f"Ground truth (real answer): {len(info['gt'])} box(es)",
+                      width="stretch")
+
+    # Tables.
+    st.markdown(f"**Model detections** (confidence ≥ {settings.WORKER_CONF})")
+    if preds:
+        detections_table(preds)
+    else:
+        st.write("No damage detected.")
+    if info["gt"] is not None:
+        st.markdown("**Ground truth labels**")
+        if info["gt"]:
+            st.dataframe(pd.DataFrame([{"class_name": b["class_name"], "type": CLASS_NAMES[b["class_name"]]}
+                                       for b in info["gt"]]), hide_index=True, width="stretch")
+        else:
+            st.write("The label file says this image has no damage.")
+        st.caption("A real damage counts as found when the model predicts the same class "
+                   "with a box overlapping it by IoU ≥ 0.5 (overlap area / combined area), "
+                   "the same rule mAP50 uses.")
+
+
+with test_tab:
+    st.markdown("Run any road photo through SmartPole, the same way a camera photo is "
+                "processed. Test images are stored as **manual tests** and never mixed "
+                "with camera data.")
+    if mt.worker_running():
+        st.caption("🟢 Worker is running.")
+    else:
+        st.error(f"🔴 The worker is not running, so images cannot be processed. {WORKER_HELP}")
+
+    up_col, rand_col = st.columns([2, 1])
+    with up_col:
+        uploaded = st.file_uploader("Upload a road photo (JPEG or PNG, e.g. saved from WhatsApp)",
+                                    type=["jpg", "jpeg", "png"])
+        if st.button("Test this image", type="primary", disabled=uploaded is None):
+            run_and_remember(uploaded.getvalue(), uploaded.name)
+    with rand_col:
+        st.write("Or let the system choose:")
+        if st.button("🎲 Pick a random test image"):
+            path = mt.random_test_image()
+            run_and_remember(path.read_bytes(), path.name)
+        st.caption("A random image from the India **test split**, which the model "
+                   "never saw during training.")
+
+    if "manual_id" in st.session_state:
+        st.divider()
+        show_manual_result(st.session_state["manual_id"])

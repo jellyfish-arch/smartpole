@@ -5,7 +5,8 @@ Run from the repository root:
 
 Endpoints
     POST /upload     raw JPEG bytes in the body (not a multipart form),
-                     headers X-Pole-ID and X-Seq
+                     headers X-Pole-ID and X-Seq. Demo tools also send
+                     X-Source: manual and X-Original-Name.
     POST /heartbeat  small JSON status message from the node
     GET  /           quick "is the server up" check
 
@@ -66,6 +67,16 @@ async def upload(request: Request):
     except ValueError:
         seq = None   # still accept the image; seq is only for diagnostics
 
+    # Optional headers, sent only by the "Test an image" demo tools. The
+    # ESP32 sends neither, so its uploads are recorded as source='camera'.
+    source = request.headers.get("X-Source", "camera").strip().lower()
+    if source not in ("camera", "manual"):
+        raise HTTPException(400, "X-Source must be 'camera' or 'manual'")
+    original_name = request.headers.get("X-Original-Name")
+    if original_name:
+        # Keep just a plain file name (no folders, no odd characters).
+        original_name = re.sub(r"[^A-Za-z0-9_.-]", "_", original_name.replace("\\", "/").split("/")[-1])[:120]
+
     body = await request.body()
 
     # ---- Check that the bytes really are a complete JPEG ----
@@ -95,9 +106,9 @@ async def upload(request: Request):
     # valid if the project folder is moved.
     rel_path = file_path.relative_to(settings.PROJECT_ROOT).as_posix()
     image_id = db.insert_image(pole_id, seq, received.isoformat(), rel_path,
-                               len(body), width, height)
+                               len(body), width, height, source, original_name)
 
-    print(f"[upload] #{image_id} {pole_id} seq={seq} {width}x{height} {len(body)} B -> {rel_path}")
+    print(f"[upload] #{image_id} {pole_id} ({source}) seq={seq} {width}x{height} {len(body)} B -> {rel_path}")
     return {"status": "ok", "image_id": image_id, "width": width, "height": height}
 
 

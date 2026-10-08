@@ -38,6 +38,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import cv2
+import numpy as np
 import torch
 from ultralytics import YOLO
 
@@ -92,9 +93,36 @@ class ModelHolder:
         for old in self.tmp_dir.glob("snapshot_*.pt"):
             if old != snapshot:
                 old.unlink(missing_ok=True)
+        # Warm-up: the very first inference is slow (~4 s on the GPU) because
+        # CUDA sets itself up. Do it now on a blank image, so the first real
+        # photo is processed at full speed.
+        try:
+            model.predict(np.zeros((settings.WORKER_IMGSZ, settings.WORKER_IMGSZ, 3), np.uint8),
+                          imgsz=settings.WORKER_IMGSZ, device=self.device, verbose=False)
+        except Exception as e:
+            print(f"[worker] warm-up failed ({e.__class__.__name__}); continuing")
         self.model, self.loaded_mtime = model, mtime
         when = datetime.fromtimestamp(mtime).strftime("%H:%M:%S")
         print(f"[worker] loaded {self.weights} (saved {when}) on device={self.device}")
+
+
+STARTED_AT = None
+
+
+def beat(holder: "ModelHolder") -> None:
+    """Tell the dashboard this worker is alive (one row per worker run)."""
+    with db.connection() as conn:
+        conn.execute(
+            """INSERT INTO workers (worker_id, started_at, last_seen, device, weights)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(worker_id) DO UPDATE SET last_seen=excluded.last_seen""",
+            (WORKER_ID, STARTED_AT, utc_now(), holder.device, str(holder.weights)))
+
+
+def remove_beat() -> None:
+    """On a clean stop, remove our row so the dashboard shows 'stopped' at once."""
+    with db.connection() as conn:
+        conn.execute("DELETE FROM workers WHERE worker_id=?", (WORKER_ID,))
 
 
 def recover_interrupted() -> None:
@@ -194,14 +222,20 @@ def main():
         # Leave most CPU cores to the training dataloader.
         torch.set_num_threads(2)
 
+    global STARTED_AT
     db.init_db()
     recover_interrupted()
     holder = ModelHolder(args.weights, args.device)
     holder.refresh()
+    STARTED_AT = utc_now()
     print(f"[worker] {WORKER_ID} waiting for pending images (Ctrl+C to stop)")
 
+    last_beat = 0.0
     try:
         while True:
+            if time.monotonic() - last_beat >= settings.WORKER_HEARTBEAT_S:
+                beat(holder)
+                last_beat = time.monotonic()
             row = claim_next()
             if row is None:
                 holder.refresh()          # pick up a newer checkpoint while idle
@@ -214,6 +248,7 @@ def main():
             except Exception as e:
                 mark_failed(row, e)
     except KeyboardInterrupt:
+        remove_beat()
         print("[worker] stopped")
 
 
