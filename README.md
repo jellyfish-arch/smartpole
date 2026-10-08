@@ -91,6 +91,18 @@ runs any road photo, such as one sent on WhatsApp or a random RDD2022 test image
 through the same server and worker as a camera photo. Step-by-step guide:
 [docs/DEMO.md](docs/DEMO.md).
 
+## Escalation to the authority
+
+Damages are tracked over time and escalated automatically (Watching →
+Monitoring → Repair requested → Urgent) to an authority portal. Design,
+rules and commands: [docs/ESCALATION.md](docs/ESCALATION.md).
+
+```powershell
+python -m escalation.service                                  # with server + worker running
+streamlit run dashboard/authority.py --server.port 8502       # authority portal
+python -m escalation.simulate                                 # scripted 3-week demo
+```
+
 ## Dataset and training
 
 ```powershell
