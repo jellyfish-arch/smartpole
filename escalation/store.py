@@ -22,7 +22,9 @@ CREATE TABLE IF NOT EXISTS poles (
     address        TEXT,
     view_w_m       REAL,          -- approx_view_m from config/poles.json
     view_h_m       REAL,
-    simulated      INTEGER NOT NULL DEFAULT 0,
+    simulated      INTEGER NOT NULL DEFAULT 0,   -- 1 for simulation AND demo poles
+    kind           TEXT NOT NULL DEFAULT 'camera',  -- camera / simulation / demo
+    speed          REAL NOT NULL DEFAULT 1,      -- demo clock speed for this pole
     last_frame_at  TEXT           -- newest photo seen from this pole
 );
 
@@ -107,9 +109,16 @@ def init() -> None:
     db.init_db()
     with db.connection() as conn:
         conn.executescript(SCHEMA)
+        # Columns added after these tables were first created.
         columns = {r["name"] for r in conn.execute("PRAGMA table_info(tracks)")}
-        if "growth_err" not in columns:          # tables created before this column existed
+        if "growth_err" not in columns:
             conn.execute("ALTER TABLE tracks ADD COLUMN growth_err REAL")
+        columns = {r["name"] for r in conn.execute("PRAGMA table_info(poles)")}
+        if "kind" not in columns:
+            conn.execute("ALTER TABLE poles ADD COLUMN kind TEXT NOT NULL DEFAULT 'camera'")
+            conn.execute("UPDATE poles SET kind='simulation' WHERE simulated=1")
+        if "speed" not in columns:
+            conn.execute("ALTER TABLE poles ADD COLUMN speed REAL NOT NULL DEFAULT 1")
 
 
 def registry() -> dict:
@@ -117,21 +126,30 @@ def registry() -> dict:
     return {k: v for k, v in data.items() if not k.startswith("_")}
 
 
-def ensure_pole(conn, pole_id: str, info: dict | None = None, simulated: bool = False) -> dict:
-    """Return the pole row; create it from config/poles.json on first sight."""
+def ensure_pole(conn, pole_id: str, info: dict | None = None, simulated: bool = False,
+                kind: str | None = None, speed: float = 1.0) -> dict:
+    """Return the pole row; create it from config/poles.json on first sight.
+
+    kind: 'camera' (real pole), 'simulation' (escalation.simulate) or 'demo'
+    (escalation.demo_replay). Simulation and demo poles are flagged simulated=1,
+    so the camera escalation service never touches them.
+    """
     row = conn.execute("SELECT * FROM poles WHERE pole_id=?", (pole_id,)).fetchone()
     if row is None or info is not None:
         info = info or registry().get(pole_id, {})
+        kind = kind or ("simulation" if simulated else "camera")
         view = info.get("approx_view_m") or (None, None)
         conn.execute(
-            """INSERT INTO poles (pole_id, name, lat, lon, address, view_w_m, view_h_m, simulated)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """INSERT INTO poles (pole_id, name, lat, lon, address, view_w_m, view_h_m,
+                                  simulated, kind, speed)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(pole_id) DO UPDATE SET name=excluded.name, lat=excluded.lat,
                  lon=excluded.lon, address=excluded.address, view_w_m=excluded.view_w_m,
-                 view_h_m=excluded.view_h_m, simulated=excluded.simulated""",
+                 view_h_m=excluded.view_h_m, simulated=excluded.simulated,
+                 kind=excluded.kind, speed=excluded.speed""",
             (pole_id, info.get("name", f"{pole_id} (not registered)"), info.get("lat"),
              info.get("lon"), info.get("address", "location not registered in config/poles.json"),
-             view[0], view[1], int(simulated)))
+             view[0], view[1], int(kind != "camera"), kind, speed))
         row = conn.execute("SELECT * FROM poles WHERE pole_id=?", (pole_id,)).fetchone()
     return dict(row)
 
@@ -144,6 +162,34 @@ def get_state(conn, key, default=None):
 def set_state(conn, key, value) -> None:
     conn.execute("INSERT INTO engine_state (key, value) VALUES (?, ?) "
                  "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, str(value)))
+
+
+def clear_demo(conn) -> list:
+    """Delete every DEMO pole with its damages, notifications and replayed photos.
+
+    Returns the photo files to delete (the caller removes them after the
+    database transaction has succeeded). Camera poles, simulation poles and
+    normal manual tests are not touched.
+    """
+    poles = [r["pole_id"] for r in conn.execute("SELECT pole_id FROM poles WHERE kind='demo'")]
+    ids = [r["id"] for r in conn.execute(
+        f"SELECT id FROM tracks WHERE pole_id IN ({','.join('?' * len(poles))})", poles)] if poles else []
+    notes = [r["id"] for r in conn.execute(
+        f"SELECT id FROM notifications WHERE track_id IN ({','.join('?' * len(ids))})", ids)] if ids else []
+    for table in ("track_observations", "track_events", "notifications"):
+        conn.executemany(f"DELETE FROM {table} WHERE track_id=?", [(i,) for i in ids])
+    conn.executemany("DELETE FROM tracks WHERE id=?", [(i,) for i in ids])
+    conn.executemany("DELETE FROM poles WHERE pole_id=?", [(p,) for p in poles])
+    # Replayed frames are stored as manual uploads (source='manual') under the
+    # demo pole's ID, so they are easy to find and never look like camera photos.
+    frames = conn.execute("SELECT id, path, annotated_path, result_path FROM images "
+                          "WHERE source='manual' AND pole_id LIKE 'DEMO-%'").fetchall()
+    files = [settings.PROJECT_ROOT / f[k] for f in frames
+             for k in ("path", "annotated_path", "result_path") if f[k]]
+    files += [p for n in notes for p in OUTBOX_DIR.glob(f"{n:05d}_*.json")]
+    conn.executemany("DELETE FROM detections WHERE image_id=?", [(f["id"],) for f in frames])
+    conn.executemany("DELETE FROM images WHERE id=?", [(f["id"],) for f in frames])
+    return files
 
 
 def clear(conn, simulated: bool | None = None) -> None:

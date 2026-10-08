@@ -20,7 +20,7 @@ import streamlit as st
 
 from config import settings
 from cv import calibration
-from escalation import engine, rules as R, store
+from escalation import demo_replay, engine, rules as R, store
 from server import db
 
 REFRESH_S = 5
@@ -43,14 +43,26 @@ def local(t):
     return parse(t).astimezone().strftime("%d %b %H:%M") if t else "-"
 
 
-def ago(t, now=None):
+def ago(t, speed=1.0):
+    """'3 h ago'. For DEMO poles (fast clock) the age is shown in demo time."""
     if not t:
         return "-"
-    s = ((now or datetime.now(timezone.utc)) - parse(t)).total_seconds()
+    s = (datetime.now(timezone.utc) - parse(t)).total_seconds() * speed
     for unit, size in (("d", 86400), ("h", 3600), ("min", 60)):
         if s >= size:
-            return f"{s / size:.0f} {unit} ago"
+            return f"{s / size:.0f} {unit} ago" + (" (demo time)" if speed != 1 else "")
     return "just now"
+
+
+TAG = {"simulation": "SIMULATION · ", "demo": "DEMO · ", "camera": ""}
+SUFFIX = {"simulation": " (SIM)", "demo": " (DEMO)", "camera": ""}
+
+
+def pole_speed(t) -> float:
+    """Clock speed for this damage's pole: demo poles run fast, camera poles use the service's speed."""
+    if t["kind"] == "camera":
+        return demo_speed()
+    return t["pole_speed"] or 1.0
 
 
 def demo_speed() -> float:
@@ -62,15 +74,14 @@ def not_seen_flag(t) -> str:
     """Warn when an open damage has not been seen although the camera is sending photos."""
     if not t["pole_last_frame"]:
         return ""
-    speed = 1.0 if t["simulated"] else demo_speed()
-    gap = engine.eff(parse(t["last_seen"]), parse(t["pole_last_frame"]), speed)
+    gap = engine.eff(parse(t["last_seen"]), parse(t["pole_last_frame"]), pole_speed(t))
     return f"⚠ not seen for {gap / R.DAY:.1f} days" if gap >= R.NOT_SEEN_FLAG else ""
 
 
 def open_tracks(show_sim: bool):
     rows = query(
         f"""SELECT t.*, p.name AS pole_name, p.lat, p.lon, p.address, p.simulated,
-                   p.last_frame_at AS pole_last_frame
+                   p.kind, p.speed AS pole_speed, p.last_frame_at AS pole_last_frame
             FROM tracks t JOIN poles p ON p.pole_id = t.pole_id
             WHERE t.level IN ({','.join('?' * len(R.OPEN_LEVELS))})
             {'' if show_sim else 'AND p.simulated = 0'}
@@ -79,9 +90,8 @@ def open_tracks(show_sim: bool):
 
 
 def describe(t) -> str:
-    sim = "SIMULATION · " if t["simulated"] else ""
     ref = t["request_id"] or f"damage #{t['id']}"
-    return (f"{ICONS[t['level']]} {sim}{ref} · {R.LABEL[t['level']]} · {t['pole_id']} · "
+    return (f"{ICONS[t['level']]} {TAG[t['kind']]}{ref} · {R.LABEL[t['level']]} · {t['pole_id']} · "
             f"{engine.CLASS_NAMES.get(t['class_name'], t['class_name'])}")
 
 
@@ -92,10 +102,22 @@ st.title("🏛️ Road repair requests")
 st.caption("SmartPole: automated pothole detection and location mapping, municipal authority view")
 
 with st.sidebar:
-    show_sim = st.checkbox("Show simulated poles (SIM-…)", value=True)
+    show_sim = st.checkbox("Show SIMULATION and DEMO poles", value=True)
     inspector = st.text_input("Your name (recorded with every action)", value="")
     st.caption("Requests are raised automatically by the escalation engine "
                "(see docs/ESCALATION.md). Only you can close them.")
+    st.divider()
+    status = demo_replay.get_status()
+    if status.get("state") not in (None, "idle"):
+        st.markdown(f"**Escalation demo:** {status['state']}")
+        if status.get("rounds"):
+            st.progress(min(1.0, status["round"] / status["rounds"]),
+                        text=f"{status.get('message', '')} ({status['round']}/{status['rounds']} demo hours)")
+    if st.button("🧹 Clear demo data", help="Deletes every DEMO pole, its damages, requests "
+                 "and replayed photos. Camera and simulation poles are not touched."):
+        n = demo_replay.clear_demo_data()
+        st.success(f"Demo data cleared ({n} files removed).")
+        st.rerun()
 
 speed = demo_speed()
 if speed != 1:
@@ -134,7 +156,7 @@ def overview():
     if requests:
         st.dataframe(pd.DataFrame([{
             "": ICONS[t["level"]],
-            "request": t["request_id"] + (" (SIM)" if t["simulated"] else ""),
+            "request": t["request_id"] + SUFFIX[t["kind"]],
             "priority": t["priority"],
             "pole": t["pole_id"],
             "location": t["address"],
@@ -143,8 +165,8 @@ def overview():
             "severity": t["severity"] or "unknown",
             "growth / week": (f"{t['growth_per_week']:+.0%} ± {t['growth_err'] or 0:.0%}"
                               if t["growth_per_week"] is not None else "-"),
-            "requested": ago(t["requested_at"]),
-            "last seen": ago(t["last_seen"]) + (f"  {not_seen_flag(t)}" if not_seen_flag(t) else ""),
+            "requested": ago(t["requested_at"], pole_speed(t)),
+            "last seen": ago(t["last_seen"], pole_speed(t)) + (f"  {not_seen_flag(t)}" if not_seen_flag(t) else ""),
             "map": (f"https://www.google.com/maps?q={t['lat']},{t['lon']}" if t["lat"] is not None else None),
         } for t in requests]), hide_index=True, width="stretch",
             column_config={"map": st.column_config.LinkColumn("map", display_text="open map")})
@@ -157,11 +179,12 @@ def overview():
         if watch:
             st.dataframe(pd.DataFrame([{
                 "": ICONS[t["level"]], "damage #": t["id"], "level": R.LABEL[t["level"]],
-                "pole": t["pole_id"] + (" (SIM)" if t["simulated"] else ""),
+                "pole": t["pole_id"] + SUFFIX[t["kind"]],
                 "damage": engine.CLASS_NAMES.get(t["class_name"], t["class_name"]),
                 "size": engine.size_text(t) if t["level"] == R.MONITORING else "-",
                 "severity": t["severity"] or "-", "sightings": t["sightings"],
-                "first seen": ago(t["first_seen"]), "last seen": ago(t["last_seen"]),
+                "first seen": ago(t["first_seen"], pole_speed(t)),
+                "last seen": ago(t["last_seen"], pole_speed(t)),
             } for t in watch]), hide_index=True, width="stretch")
             st.caption("Watching = seen but not yet proven real (needs 5 sightings in 3 different "
                        "hours over 6 h). Monitoring = real, being measured; Low-severity damages stay here.")
@@ -213,6 +236,11 @@ else:
 
     with right:
         st.markdown(f"### {describe(t)}")
+        if t["kind"] == "demo":
+            st.warning("**DEMO pole: one photo replayed as hourly camera photos** (1 s = 1 h). "
+                       "Detection, tracking and escalation are real. **Growth is ~0 % because "
+                       "every frame is the same photo**: a replay cannot show a damage growing. "
+                       "Real growth needs real photos of the same spot taken days apart.")
         facts = {
             "Level": R.LABEL[t["level"]] + (f" (priority {t['priority']})" if t["priority"] else ""),
             "Damage": f"{engine.CLASS_NAMES.get(t['class_name'], t['class_name'])} ({t['class_name']})",
@@ -223,8 +251,8 @@ else:
             "Location": t["address"],
             "GPS": f"{t['lat']}, {t['lon']}" if t["lat"] is not None else "not registered",
             "Position in view": calibration.position_text(t["pole_id"], (t["x1"], t["y1"], t["x2"], t["y2"])),
-            "First seen": f"{local(t['first_seen'])} ({ago(t['first_seen'])})",
-            "Last seen": f"{local(t['last_seen'])} ({ago(t['last_seen'])}) {not_seen_flag(t)}",
+            "First seen": f"{local(t['first_seen'])} ({ago(t['first_seen'], pole_speed(t))})",
+            "Last seen": f"{local(t['last_seen'])} ({ago(t['last_seen'], pole_speed(t))}) {not_seen_flag(t)}",
             "Sightings": t["sightings"],
         }
         if t["reappeared_after"]:

@@ -96,7 +96,7 @@ def main():
     with db.connection() as conn:
         store.clear(conn, simulated=True)
         for pole_id, info in POLES.items():
-            store.ensure_pole(conn, pole_id, info, simulated=True)
+            store.ensure_pole(conn, pole_id, info, kind="simulation")
             conn.execute("UPDATE poles SET last_frame_at=NULL WHERE pole_id=?", (pole_id,))
 
     rng = random.Random(42)                       # same story every run

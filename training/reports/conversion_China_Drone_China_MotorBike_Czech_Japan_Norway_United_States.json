@@ -1,0 +1,72 @@
+{
+  "classes": [
+    "D00",
+    "D10",
+    "D20",
+    "D40"
+  ],
+  "max_side": 1280,
+  "countries": {
+    "China_Drone": {
+      "dropped_Block crack": 3,
+      "dropped_Repair": 769,
+      "images": 2401,
+      "images_background": 482,
+      "images_with_boxes": 1919,
+      "kept_D00": 1426,
+      "kept_D10": 1263,
+      "kept_D20": 293,
+      "kept_D40": 86
+    },
+    "China_MotorBike": {
+      "dropped_Repair": 277,
+      "images": 1977,
+      "images_background": 43,
+      "images_with_boxes": 1934,
+      "kept_D00": 2678,
+      "kept_D10": 1096,
+      "kept_D20": 641,
+      "kept_D40": 235
+    },
+    "Czech": {
+      "images": 2829,
+      "images_background": 1757,
+      "images_with_boxes": 1072,
+      "kept_D00": 988,
+      "kept_D10": 399,
+      "kept_D20": 161,
+      "kept_D40": 197
+    },
+    "Japan": {
+      "dropped_D43": 736,
+      "dropped_D44": 3995,
+      "dropped_D50": 3553,
+      "dropped_degenerate_box": 1,
+      "images": 10506,
+      "images_background": 2606,
+      "images_with_boxes": 7900,
+      "kept_D00": 4049,
+      "kept_D10": 3979,
+      "kept_D20": 6198,
+      "kept_D40": 2243
+    },
+    "Norway": {
+      "images": 8161,
+      "images_background": 5247,
+      "images_resized": 8161,
+      "images_with_boxes": 2914,
+      "kept_D00": 8570,
+      "kept_D10": 1730,
+      "kept_D20": 468,
+      "kept_D40": 461
+    },
+    "United_States": {
+      "images": 4805,
+      "images_with_boxes": 4805,
+      "kept_D00": 6750,
+      "kept_D10": 3295,
+      "kept_D20": 834,
+      "kept_D40": 135
+    }
+  }
+}

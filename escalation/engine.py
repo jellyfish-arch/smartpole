@@ -298,7 +298,8 @@ def _notify(conn, t, now, reason) -> None:
     pole = dict(conn.execute("SELECT * FROM poles WHERE pole_id=?", (t["pole_id"],)).fetchone())
     upgrade = t["level"] == R.URGENT and t["requested_at"] != now.isoformat()
     kind = "URGENT repair" if t["level"] == R.URGENT else "Repair request"
-    subject = (f"[{'SIMULATION ' if pole['simulated'] else ''}{kind}] {t['request_id']}: "
+    tag = {"simulation": "SIMULATION ", "demo": "DEMO "}.get(pole.get("kind"), "")
+    subject = (f"[{tag}{kind}] {t['request_id']}: "
                f"{CLASS_NAMES.get(t['class_name'], t['class_name'])} at {pole['pole_id']}")
     maps = (f"https://www.google.com/maps?q={pole['lat']},{pole['lon']}"
             if pole["lat"] is not None else "location not registered")

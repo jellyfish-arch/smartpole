@@ -30,6 +30,11 @@ CLASS_NAMES = {"D00": "Longitudinal crack", "D10": "Transverse crack",
 YOLO_DIR = settings.DATASET_DIR / "yolo"
 GT_COLOR = (0, 200, 0)   # BGR green for ground-truth boxes
 
+# RDD2022 folders. The current model was trained on India only, so the other
+# countries test how well it generalises to roads it has never seen.
+COUNTRIES = ["India", "Japan", "Czech", "Norway", "United_States", "China_Drone", "China_MotorBike"]
+TRAINED_ON = "India"
+
 # Why a train or val image is not a fair test of the model.
 SPLIT_WARNING = {
     "train": "this image is in the TRAINING split: the model learned from it, so a "
@@ -78,11 +83,14 @@ def worker_running() -> bool:
         return conn.execute("SELECT 1 FROM workers WHERE last_seen >= ? LIMIT 1", (cutoff,)).fetchone() is not None
 
 
-def upload(jpeg: bytes, original_name: str) -> int:
-    """Send the JPEG to the server's /upload, exactly like the ESP32. Returns the image id."""
+def upload(jpeg: bytes, original_name: str, pole_id: str = settings.MANUAL_POLE_ID) -> int:
+    """Send the JPEG to the server's /upload, exactly like the ESP32. Returns the image id.
+
+    Always marked X-Source: manual, so it never counts as a camera photo.
+    """
     req = urllib.request.Request(
         f"{settings.LOCAL_SERVER_URL}/upload", data=jpeg, method="POST",
-        headers={"Content-Type": "image/jpeg", "X-Pole-ID": settings.MANUAL_POLE_ID,
+        headers={"Content-Type": "image/jpeg", "X-Pole-ID": pole_id,
                  "X-Seq": "0", "X-Source": "manual", "X-Original-Name": original_name})
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
@@ -122,10 +130,25 @@ def detections(image_id: int) -> list[dict]:
 
 def random_test_image(country: str = "India") -> Path:
     """A random image from our held-out test split (never used in training)."""
+    return random_test_images(country, 1)[0]
+
+
+def random_test_images(country: str, n: int) -> list[Path]:
+    """n different random images from one country's test split."""
     split_file = YOLO_DIR / "splits" / f"{country}_test.txt"
     if not split_file.exists():
-        raise DemoError(f"{split_file} not found. Run training.split_dataset first.")
-    return Path(random.choice(split_file.read_text().split()))
+        raise DemoError(f"No test split for {country} yet. Run training.convert_voc_to_yolo "
+                        f"and training.split_dataset for it first.")
+    paths = split_file.read_text().split()
+    return [Path(p) for p in random.sample(paths, min(n, len(paths)))]
+
+
+def country_of(name: str) -> str | None:
+    """RDD2022 country of a dataset image (from its label folder), else None."""
+    if not name:
+        return None
+    matches = list((YOLO_DIR / "labels").glob(f"*/{Path(name).stem}.txt"))
+    return matches[0].parent.name if matches else None
 
 
 def dataset_split(name: str) -> str | None:
@@ -210,6 +233,53 @@ def compare(preds: list[dict], gt_px: list[dict], iou_threshold: float = 0.5) ->
 
 
 # ---------------------------------------------------------------- whole test
+
+def draw_overlay(annotated_path: Path, gt_px: list[dict]) -> np.ndarray:
+    """The model's annotated image with the ground truth added in green (for grids)."""
+    return draw_ground_truth(annotated_path, gt_px)
+
+
+def run_batch(items: list[tuple[bytes, str]], timeout_s: float = settings.MANUAL_WAIT_S) -> list[int]:
+    """Upload every image first, then wait for all results. Returns the image ids.
+
+    Uploading all at once lets the worker process them back to back.
+    """
+    if not worker_running():
+        raise DemoError("The worker is not running. Start it with:  python -m worker.worker")
+    ids = [upload(prepare_jpeg(data)[0], name) for data, name in items]
+    for image_id in ids:
+        wait_for_result(image_id, timeout_s)
+    return ids
+
+
+def summarise(image_ids: list[int]) -> tuple[list[dict], dict]:
+    """Per-image comparison rows and overall totals for a batch."""
+    rows = []
+    for image_id in image_ids:
+        info = describe(image_id)
+        c = info["comparison"]
+        rows.append({
+            "image #": image_id,
+            "file": info["row"]["original_name"],
+            "country": country_of(info["row"]["original_name"]) or "not RDD2022",
+            "split": info["split"] or "-",
+            "model detections": len(info["preds"]),
+            "real damages": c["real"] if c else None,
+            "found": c["found"] if c else None,
+            "missed": c["missed"] if c else None,
+            "false alarms": c["false_alarms"] if c else None,
+            "inference ms": round(info["row"]["inference_ms"] or 0),
+        })
+    labelled = [r for r in rows if r["real damages"] is not None]
+    real = sum(r["real damages"] for r in labelled)
+    found = sum(r["found"] for r in labelled)
+    alarms = sum(r["false alarms"] for r in labelled)
+    totals = {"images": len(rows), "with ground truth": len(labelled), "real damages": real,
+              "found": found, "missed": real - found, "false alarms": alarms,
+              "recall": found / real if real else None,
+              "precision": found / (found + alarms) if (found + alarms) else None}
+    return rows, totals
+
 
 def run_test(data: bytes, original_name: str, timeout_s: float = settings.MANUAL_WAIT_S) -> dict:
     """Prepare, upload, wait for the worker, and collect everything to show."""

@@ -14,6 +14,7 @@ Two tabs:
 """
 
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -26,6 +27,7 @@ import streamlit as st
 
 from config import settings
 from server import db
+from escalation import demo_replay
 from tools import manual_test as mt
 
 REFRESH_S = 3
@@ -76,7 +78,7 @@ st.set_page_config(page_title="SmartPole", page_icon="🛣️", layout="wide")
 st.title("SmartPole: road damage monitor")
 db.init_db()   # creates empty tables if the server has never run yet
 
-live_tab, test_tab = st.tabs(["📷 Live camera", "🧪 Test an image"])
+live_tab, test_tab = st.tabs(["📷 Live camera", "🧪 Test images"])
 
 
 # ======================================================================
@@ -188,25 +190,38 @@ with live_tab:
 
 
 # ======================================================================
-# Test an image (demo mode)
+# Test images (demo mode): batch testing + escalation demo
 # ======================================================================
 
-def run_and_remember(data: bytes, name: str):
-    """Send one image through the system and keep its id for display."""
-    with st.spinner(f"Sending {name} to the server and waiting for the worker..."):
+def run_batch_and_remember(items: list[tuple[bytes, str]]):
+    """Send several images through the system and keep their ids for display."""
+    with st.spinner(f"Sending {len(items)} image(s) to the server and waiting for the worker..."):
         try:
-            test = mt.run_test(data, name)
-            st.session_state["manual_id"] = test["image_id"]
-            st.session_state["manual_total_s"] = test["total_s"]
+            start = time.monotonic()
+            ids = mt.run_batch(items)
+            st.session_state["batch_ids"] = ids
+            st.session_state["batch_total_s"] = time.monotonic() - start
         except mt.DemoError as e:
-            st.session_state.pop("manual_id", None)
             st.error(str(e))
 
 
-def show_manual_result(image_id: int):
+def generalisation_note(countries: set):
+    others = sorted(c for c in countries if c not in (mt.TRAINED_ON, "not RDD2022"))
+    if others:
+        st.info(f"**The model was trained on {mt.TRAINED_ON} roads only.** Images from "
+                f"{', '.join(others)} test how well it **generalises** to roads, cameras and "
+                "road markings it has never seen, so lower accuracy there is expected. "
+                "Training on all countries is planned for Phase 7.")
+    if "not RDD2022" in countries:
+        st.caption("Uploaded photos that are not from RDD2022 have no ground truth: only the "
+                   "model's prediction is shown for them.")
+
+
+def show_manual_result(image_id: int, total_s: float | None = None):
     info = mt.describe(image_id)
     row = info["row"]
     name = row["original_name"] or f"image #{image_id}"
+    country = mt.country_of(row["original_name"])
     st.subheader(f"Result: {name}  (image #{image_id})")
 
     if row["status"] == "error":
@@ -219,17 +234,16 @@ def show_manual_result(image_id: int):
                 "WhatsApp photo), so there is no correct answer to compare with. "
                 "Only the model's prediction is shown.")
     elif info["split"] == "test":
-        st.success(f"RDD2022 image: {mt.SPLIT_WARNING['test']}")
+        st.success(f"RDD2022 image from {country}: {mt.SPLIT_WARNING['test']}")
     elif info["split"] in ("train", "val"):
-        st.warning(f"RDD2022 image: {mt.SPLIT_WARNING[info['split']]}")
+        st.warning(f"RDD2022 image from {country}: {mt.SPLIT_WARNING[info['split']]}")
 
     # Numbers.
     preds = info["preds"]
     m = st.columns(5 if info["comparison"] else 3)
     m[0].metric("Damages found by model", len(preds))
     m[1].metric("Model processing time", f"{row['inference_ms']:.0f} ms")
-    total = st.session_state.get("manual_total_s")
-    m[2].metric("Total (upload + queue + model)", f"{total:.1f} s" if total else "-")
+    m[2].metric("Total (upload + queue + model)", f"{total_s:.1f} s" if total_s else "-")
     if info["comparison"]:
         c = info["comparison"]
         if c["real"]:
@@ -267,29 +281,163 @@ def show_manual_result(image_id: int):
                    "the same rule mAP50 uses.")
 
 
+def show_batch(ids: list[int]):
+    rows, totals = mt.summarise(ids)
+    st.subheader(f"Results for {len(ids)} image(s)")
+    generalisation_note({r["country"] for r in rows})
+
+    # ---- totals ----
+    m = st.columns(5)
+    m[0].metric("Images", totals["images"])
+    m[1].metric("Real damages (ground truth)", totals["real damages"] if totals["with ground truth"] else "-")
+    m[2].metric("Found", f"{totals['found']} of {totals['real damages']}" if totals["real damages"] else "-")
+    m[3].metric("Missed", totals["missed"] if totals["with ground truth"] else "-")
+    m[4].metric("False alarms", totals["false alarms"] if totals["with ground truth"] else "-")
+    if totals["recall"] is not None:
+        st.caption(f"On these {totals['with ground truth']} labelled image(s): the model found "
+                   f"{totals['recall']:.0%} of the real damages (recall) and "
+                   f"{(totals['precision'] or 0):.0%} of its boxes were real damages (precision). "
+                   "A handful of images is a demonstration, not the official evaluation "
+                   "(that uses the whole test set, Phase 7).")
+
+    # ---- grid: model boxes + ground truth in green ----
+    st.markdown("**Model prediction** (coloured boxes) with the **ground truth in green**")
+    per_row = 3
+    for start in range(0, len(rows), per_row):
+        cols = st.columns(per_row)
+        for col, r in zip(cols, rows[start:start + per_row]):
+            info = mt.describe(r["image #"])
+            annotated = settings.PROJECT_ROOT / info["row"]["annotated_path"]
+            picture = mt.draw_overlay(annotated, info["gt"]) if info["gt"] is not None else str(annotated)
+            if r["real damages"] is None:
+                caption = f"#{r['image #']} {r['file']} · {r['model detections']} detection(s) · no ground truth"
+            elif r["real damages"] == 0:
+                caption = (f"#{r['image #']} {r['country']} · clean road · "
+                           f"{r['false alarms']} false alarm(s)")
+            else:
+                caption = (f"#{r['image #']} {r['country']} · found {r['found']} of "
+                           f"{r['real damages']} · {r['false alarms']} false alarm(s)")
+            col.image(picture, caption=caption, width="stretch")
+
+    # ---- summary table with a totals row ----
+    table = pd.DataFrame(rows)
+    total_row = {"image #": "TOTAL", "file": "", "country": "", "split": "",
+                 "model detections": table["model detections"].sum(),
+                 "real damages": totals["real damages"], "found": totals["found"],
+                 "missed": totals["missed"], "false alarms": totals["false alarms"],
+                 "inference ms": round(table["inference ms"].mean())}
+    table = pd.concat([table, pd.DataFrame([total_row])], ignore_index=True).astype(str)
+    st.dataframe(table.replace({"None": "-", "nan": "-"}), hide_index=True, width="stretch")
+
+    # ---- one image in full detail ----
+    with st.expander("Show one image in detail (original, prediction, ground truth side by side)"):
+        chosen = st.selectbox("Image", ids, format_func=lambda i: next(
+            f"#{r['image #']} {r['file']}" for r in rows if r["image #"] == i))
+        show_manual_result(chosen)
+
+
+@st.fragment(run_every=2)
+def demo_status():
+    status = demo_replay.get_status()
+    state = status.get("state", "idle")
+    if state == "idle":
+        st.caption("No escalation demo running.")
+        return
+    poles = ", ".join(f"{p}: {n}" for p, n in (status.get("poles") or {}).items())
+    icon = {"running": "⏳", "finished": "✅", "stopped": "⏹", "error": "❌"}.get(state, "")
+    st.markdown(f"{icon} **Escalation demo {state}**: {status.get('message', '')}")
+    if status.get("rounds"):
+        st.progress(min(1.0, status["round"] / status["rounds"]),
+                    text=f"{status['round']} of {status['rounds']} demo hours")
+    st.caption(f"Demo poles: {poles}")
+
+
+def escalation_demo(ids: list[int]):
+    st.subheader("Simulate escalation with these images")
+    st.markdown(
+        "Each chosen image becomes the fixed camera view of one **DEMO pole**. Once per demo "
+        "hour (**1 second = 1 hour**, so one day takes 24 s) the image is sent again as that "
+        "pole's camera photo, through the real server, the real YOLO worker and the real "
+        "escalation engine with its real thresholds. Watch it go Watching → Monitoring → "
+        "Repair requested (or Urgent) on the **authority portal**.")
+    st.warning("**Growth is not simulated.** The same photo is replayed, so a damage cannot "
+               "grow: growth will show about 0 %. Real growth needs real photos of the same "
+               "spot taken days apart.")
+    names = {r["image #"]: r["file"] for r in mt.summarise(ids)[0]}
+    chosen = st.multiselect(f"Images to replay (one DEMO pole each, at most {demo_replay.MAX_POLES})",
+                            ids, default=ids[:demo_replay.MAX_POLES],
+                            format_func=lambda i: f"#{i} {names.get(i, '')}",
+                            max_selections=demo_replay.MAX_POLES)
+    c1, c2, c3, c4, c5 = st.columns(5)
+    vehicle = c1.checkbox("Passing vehicles", value=True, help="Now and then a vehicle covers part of the view for one frame")
+    lighting = c2.checkbox("Lighting changes", value=True, help="Brightness varies; darker at dawn and dusk")
+    jitter = c3.checkbox("Camera jitter", value=True, help="The view shifts by a few pixels (wind on the pole)")
+    night = c4.checkbox("Night", value=True, help="Photos between 20:00 and 06:00 are almost black (unlit camera)")
+    days = c5.number_input("Demo days", min_value=3, max_value=7, value=4,
+                           help="3 days of monitoring are needed before a normal request")
+
+    running = demo_replay.get_status().get("state") == "running"
+    b1, b2, b3, b4 = st.columns(4)
+    if b1.button("▶ Start escalation demo", type="primary", disabled=running or not chosen):
+        if not mt.worker_running():
+            st.error(f"The worker is not running. {WORKER_HELP}")
+        else:
+            args = ["--image-ids", *map(str, chosen), "--days", str(int(days))]
+            args += [f"--no-{name}" for name, on in (("vehicle", vehicle), ("lighting", lighting),
+                                                     ("jitter", jitter), ("night", night)) if not on]
+            demo_replay.start_detached(args)
+            time.sleep(1.5)
+            st.rerun()
+    if b2.button("⏹ Stop demo", disabled=not running):
+        demo_replay.request_stop()
+    if b3.button("🧹 Clear demo data", help="Deletes every DEMO pole, its damages, requests and "
+                 "replayed photos. Camera poles and normal manual tests are not touched."):
+        n = demo_replay.clear_demo_data()
+        st.success(f"Demo data cleared ({n} files removed).")
+    b4.link_button("Open authority portal", "http://localhost:8502")
+    demo_status()
+
+
 with test_tab:
-    st.markdown("Run any road photo through SmartPole, the same way a camera photo is "
-                "processed. Test images are stored as **manual tests** and never mixed "
-                "with camera data.")
+    st.markdown("Run any road photos through SmartPole, the same way a camera photo is "
+                "processed. Test images are stored as **manual tests**: they never mix with "
+                "camera data and never create repair requests.")
     if mt.worker_running():
         st.caption("🟢 Worker is running.")
     else:
         st.error(f"🔴 The worker is not running, so images cannot be processed. {WORKER_HELP}")
 
-    up_col, rand_col = st.columns([2, 1])
+    up_col, rand_col = st.columns([3, 2])
     with up_col:
-        uploaded = st.file_uploader("Upload a road photo (JPEG or PNG, e.g. saved from WhatsApp)",
-                                    type=["jpg", "jpeg", "png"])
-        if st.button("Test this image", type="primary", disabled=uploaded is None):
-            run_and_remember(uploaded.getvalue(), uploaded.name)
+        uploaded = st.file_uploader("Upload road photos (JPEG or PNG, e.g. saved from WhatsApp). "
+                                    "You can select several at once.",
+                                    type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+        if st.button(f"Test {len(uploaded) or ''} uploaded image(s)", type="primary", disabled=not uploaded):
+            run_batch_and_remember([(f.getvalue(), f.name) for f in uploaded])
     with rand_col:
-        st.write("Or let the system choose:")
-        if st.button("🎲 Pick a random test image"):
-            path = mt.random_test_image()
-            run_and_remember(path.read_bytes(), path.name)
-        st.caption("A random image from the India **test split**, which the model "
-                   "never saw during training.")
+        st.write("Or pick random images from a country's **test split**:")
+        country = st.selectbox("Country", mt.COUNTRIES,
+                               format_func=lambda c: f"{c} (model trained on this)" if c == mt.TRAINED_ON
+                               else f"{c} (unseen country)")
+        n = st.number_input("How many", min_value=1, max_value=12, value=6)
+        if st.button(f"🎲 Pick {int(n)} random test images"):
+            try:
+                paths = mt.random_test_images(country, int(n))
+                run_batch_and_remember([(p.read_bytes(), p.name) for p in paths])
+            except mt.DemoError as e:
+                st.error(str(e))
+        st.caption("Test-split images were held out before training, and every one has "
+                   "ground truth labels to compare with.")
 
-    if "manual_id" in st.session_state:
+    if st.session_state.get("batch_ids"):
         st.divider()
-        show_manual_result(st.session_state["manual_id"])
+        show_batch(st.session_state["batch_ids"])
+        st.caption(f"Whole batch: {st.session_state.get('batch_total_s', 0):.1f} s "
+                   "(upload + queue + model).")
+        st.divider()
+        escalation_demo(st.session_state["batch_ids"])
+    else:
+        st.divider()
+        st.subheader("Simulate escalation with images")
+        st.write("Test some images first (above). You can then replay them as DEMO poles.")
+        demo_status()
