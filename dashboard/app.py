@@ -27,7 +27,8 @@ import streamlit as st
 
 from config import settings
 from server import db
-from escalation import demo_replay
+from cv import calibration, reference
+from escalation import demo_replay, rules, store
 from tools import manual_test as mt
 
 REFRESH_S = 3
@@ -61,17 +62,43 @@ def query(sql, params=()):
         return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
 
-def detections_table(rows):
+def detections_table(rows, extra_columns=()):
     """Detections as a table with a confidence bar."""
     df = pd.DataFrame(rows)
     df.insert(1, "type", df["class_name"].map(CLASS_NAMES))
     df["box (x1, y1, x2, y2)"] = df.apply(
         lambda r: f"({r.x1:.0f}, {r.y1:.0f}, {r.x2:.0f}, {r.y2:.0f})", axis=1)
     df["size (px)"] = df.apply(lambda r: f"{r.x2 - r.x1:.0f} x {r.y2 - r.y1:.0f}", axis=1)
-    st.dataframe(df[["class_name", "type", "confidence", "box (x1, y1, x2, y2)", "size (px)"]],
+    st.dataframe(df[["class_name", "type", "confidence", *extra_columns, "box (x1, y1, x2, y2)", "size (px)"]],
                  hide_index=True, width="stretch",
                  column_config={"confidence": st.column_config.ProgressColumn(
                      "confidence", min_value=0.0, max_value=1.0, format="%.2f")})
+
+
+def add_real_sizes(dets, pole, width, height) -> str:
+    """Add 'real size' and 'severity' to each detection. Returns the size basis.
+
+    calibrated: real cm from the A4 calibration (perspective-corrected).
+    estimate:   no calibration yet; rough cm from the pole's approximate view.
+    unknown:    neither; only pixels are shown.
+    """
+    view = store.registry().get(pole, {}).get("approx_view_m")
+    basis = "unknown"
+    for d in dets:
+        box = (d["x1"] / width, d["y1"] / height, d["x2"] / width, d["y2"] / height)
+        m = calibration.measure(pole, box, view)
+        basis = m["basis"]
+        crack = d["class_name"] in rules.CRACK_CLASSES
+        value, unit = (m["length_cm"], "cm long") if crack else (m["area_cm2"], "cm²")
+        sev = rules.severity(d["class_name"], m["area_cm2"], m["length_cm"], None)
+        if basis == "calibrated":
+            d["real size"], d["severity"] = f"{value:.0f} {unit}", sev
+        elif basis == "estimate":
+            d["real size"], d["severity"] = f"≈{value:.0f} {unit} (estimate)", f"{sev} (estimate)"
+        else:
+            d["real size"] = "uncalibrated: pixel-area estimate only"
+            d["severity"] = "-"
+    return basis
 
 
 st.set_page_config(page_title="SmartPole", page_icon="🛣️", layout="wide")
@@ -141,9 +168,23 @@ def live_view(pole):
     if not dets:
         st.write(f"No damage detected above the confidence threshold ({settings.WORKER_CONF}).")
     else:
-        detections_table(dets)
-        st.caption("Sizes are in pixels. Real-world centimetres need the camera "
-                   "calibration (Phase 6).")
+        basis = add_real_sizes(dets, pole, img["width"], img["height"])
+        detections_table(dets, ("real size", "severity"))
+        if basis == "calibrated":
+            st.caption("Real sizes come from the A4 calibration (perspective-corrected). "
+                       "Severity: Low < 100 cm² or crack < 30 cm, Medium 100-500 cm², High > 500 cm² "
+                       "(High also when growing > 10 %/week, tracked in the authority portal).")
+        else:
+            st.caption("**Uncalibrated: sizes are estimates only.** After the camera is fixed in "
+                       "its final position, run `python -m cv.calibrate` with an A4 sheet in view.")
+
+    # ---------------- reference-frame differencing (optional) ----------------
+    diff = reference.changed_regions(pole, settings.PROJECT_ROOT / img["path"])
+    if diff is not None:
+        with st.expander(f"Changed since the clean-road reference photo: {diff[1]} region(s)"):
+            st.image(diff[0], width="stretch",
+                     caption="Yellow boxes = areas that differ from the reference photo. A second "
+                             "signal next to YOLO: shadows, leaves or a car also count as changes.")
 
     # ---------------- counts ----------------
     st.subheader("Counts by damage type")

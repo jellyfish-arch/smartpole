@@ -91,6 +91,23 @@ runs any road photo, such as one sent on WhatsApp or a random RDD2022 test image
 through the same server and worker as a camera photo. Step-by-step guide:
 [docs/DEMO.md](docs/DEMO.md).
 
+## Calibration (real sizes in cm)
+
+**Only calibrate after the camera is fixed in its final position.** Put an A4
+sheet (21 x 29.7 cm) flat under the camera, let the node take a photo, then:
+
+```powershell
+python -m cv.calibrate                      # click the 4 corners of the A4 sheet
+```
+
+Click around the sheet, first two clicks along a short (21 cm) edge; `s` saves.
+The tilted view makes the sheet a trapezium; the 4 corners give a homography
+that undoes the perspective. Saved to `data/calibration/POLE01.json`; remove
+with `--delete`. Without it, sizes are shown as estimates.
+
+Optional second signal: `python -m cv.reference --save` stores the clean-road
+photo; the dashboard then shows where newer photos differ from it.
+
 ## Escalation to the authority
 
 Damages are tracked over time and escalated automatically (Watching →

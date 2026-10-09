@@ -119,6 +119,10 @@ def init() -> None:
             conn.execute("UPDATE poles SET kind='simulation' WHERE simulated=1")
         if "speed" not in columns:
             conn.execute("ALTER TABLE poles ADD COLUMN speed REAL NOT NULL DEFAULT 1")
+        # config/poles.json is the single source for registered camera poles:
+        # refresh their name, GPS and approximate view on every start.
+        for pole_id, info in registry().items():
+            ensure_pole(conn, pole_id, info, kind="camera")
 
 
 def registry() -> dict:

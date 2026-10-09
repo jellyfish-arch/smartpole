@@ -1,10 +1,13 @@
 {
-  "_comment": "Registry of installed SmartPole nodes. lat/lon = the pole's GPS position. approx_view_m = roughly how much road the camera sees (width, height in metres), entered at installation; used only for the 'uncalibrated estimate' of size until the pole is calibrated. The coordinates below are EXAMPLES near VIT-AP: replace them with the real GPS of each pole when it is installed.",
+  "_comment": "Registry of installed SmartPole nodes. lat/lon = the pole's GPS position. approx_view_m = roughly how much road the camera sees (width, height in metres), entered at installation; used only for the 'uncalibrated estimate' of size until the pole is calibrated. The coordinates below are EXAMPLES near VIT-AP: replace them with the real GPS of each pole when it is installed. POLE01's approx_view_m is the prototype setup: a camera on a rod looking at an A3 sheet (about 45 x 35 cm in view).",
   "POLE01": {
     "name": "Pole 1 (prototype node)",
     "lat": 16.4966,
     "lon": 80.4999,
     "address": "Example location: VIT-AP campus road (replace with the real pole position)",
-    "approx_view_m": [2.0, 1.5]
+    "approx_view_m": [
+      0.45,
+      0.35
+    ]
   }
 }
