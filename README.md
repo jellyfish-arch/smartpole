@@ -51,6 +51,69 @@ internet still need a signature.
 index matters: plain `pip install torch` from PyPI on Windows installs a
 **CPU-only** build, and training would not use the GPU.
 
+## Firmware (ESP32-CAM)
+
+1. Copy `firmware/smartpole_node/secrets.example.h` to `secrets.h` and fill in
+   the hotspot name and password (`secrets.h` is gitignored).
+2. Open `firmware/smartpole_node/smartpole_node.ino` in Arduino IDE.
+3. Tools: Board **ESP32 Dev Module**, PSRAM **Enabled**, Partition Scheme
+   **Huge APP (3MB No OTA/1MB SPIFFS)**, Upload Speed **115200**, Port = the
+   MB board's COM port.
+4. Upload, then open Serial Monitor at 115200 baud.
+
+## Server
+
+```powershell
+python -m server.app                  # listens on 0.0.0.0:8000, broadcasts on UDP 50000
+python -m server.send_test_image      # second terminal: fake ESP32 uploads
+python -m server.listen_discovery     # second terminal: check the UDP broadcast
+```
+
+## Worker and dashboard
+
+Each in its own terminal, alongside the server:
+
+```powershell
+python -m worker.worker               # YOLO on new uploads (weights/device in config/settings.py)
+streamlit run dashboard/app.py        # http://localhost:8501, refreshes every 3 s
+python -m worker.check_integrity      # any time: proves no image was processed twice
+```
+
+Don't run the worker on the GPU while a training run is going: on this
+laptop (15 GB RAM) the extra PyTorch process ran Windows out of memory and
+crashed training. Use `--device cpu` and train with `--workers 2` if both
+must run together.
+
+## Demo: test any image
+
+The dashboard's **Test an image** tab (and `python -m tools.test_image <image>`)
+runs any road photo, such as one sent on WhatsApp or a random RDD2022 test image,
+through the same server and worker as a camera photo. Step-by-step guide:
+[docs/DEMO.md](docs/DEMO.md).
+
+## Escalation to the authority
+
+Damages are tracked over time and escalated automatically (Watching →
+Monitoring → Repair requested → Urgent) to an authority portal. Design,
+rules and commands: [docs/ESCALATION.md](docs/ESCALATION.md).
+
+```powershell
+python -m escalation.service                                  # with server + worker running
+streamlit run dashboard/authority.py --server.port 8502       # authority portal
+python -m escalation.simulate                                 # scripted 3-week demo
+```
+
+## Dataset and training
+
+```powershell
+python -m training.extract_rdd2022                         # unzip figshare archive (once)
+python -m training.inspect_dataset                         # label counts -> training/reports/
+python -m training.convert_voc_to_yolo --countries India   # VOC XML -> YOLO txt
+python -m training.split_dataset --countries India --name india
+python -m training.train                                   # India baseline, yolo11n
+python -m training.train --name india_yolo11n --resume     # continue an interrupted run
+```
+
 ## Backing up model weights (do this every time training finishes)
 
 `.pt` files are excluded from git. They are too large for GitHub, and

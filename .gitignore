@@ -48,3 +48,6 @@ firmware/**/secrets.h
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# ---- Demo photos (e.g. from WhatsApp) stay on this laptop ----
+demo_images/

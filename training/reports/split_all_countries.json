@@ -1,0 +1,120 @@
+{
+  "seed": 42,
+  "train_frac": 0.8,
+  "val_frac": 0.1,
+  "max_background_frac": 0.1,
+  "countries": {
+    "China_Drone": {
+      "train": {
+        "images": 1705,
+        "background": 170
+      },
+      "val": {
+        "images": 213,
+        "background": 21
+      },
+      "test": {
+        "images": 214,
+        "background": 22
+      },
+      "background_available": 482,
+      "background_used": 213
+    },
+    "China_MotorBike": {
+      "train": {
+        "images": 1581,
+        "background": 34
+      },
+      "val": {
+        "images": 197,
+        "background": 4
+      },
+      "test": {
+        "images": 199,
+        "background": 5
+      },
+      "background_available": 43,
+      "background_used": 43
+    },
+    "Czech": {
+      "train": {
+        "images": 953,
+        "background": 95
+      },
+      "val": {
+        "images": 119,
+        "background": 12
+      },
+      "test": {
+        "images": 119,
+        "background": 12
+      },
+      "background_available": 1757,
+      "background_used": 119
+    },
+    "India": {
+      "train": {
+        "images": 2864,
+        "background": 286
+      },
+      "val": {
+        "images": 358,
+        "background": 36
+      },
+      "test": {
+        "images": 359,
+        "background": 36
+      },
+      "background_available": 4483,
+      "background_used": 358
+    },
+    "Japan": {
+      "train": {
+        "images": 7022,
+        "background": 702
+      },
+      "val": {
+        "images": 878,
+        "background": 88
+      },
+      "test": {
+        "images": 877,
+        "background": 87
+      },
+      "background_available": 2606,
+      "background_used": 877
+    },
+    "Norway": {
+      "train": {
+        "images": 2589,
+        "background": 258
+      },
+      "val": {
+        "images": 323,
+        "background": 32
+      },
+      "test": {
+        "images": 325,
+        "background": 33
+      },
+      "background_available": 5247,
+      "background_used": 323
+    },
+    "United_States": {
+      "train": {
+        "images": 3844,
+        "background": 0
+      },
+      "val": {
+        "images": 480,
+        "background": 0
+      },
+      "test": {
+        "images": 481,
+        "background": 0
+      },
+      "background_available": 0,
+      "background_used": 0
+    }
+  }
+}
